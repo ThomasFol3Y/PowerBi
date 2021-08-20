@@ -1,1 +1,261 @@
+---
+title: "SuRvival Analysis: Pilot Study"
+author: "Thomas.foley@timeshiftmedia.com"
+date: ""
+output: html_document
+---
+
+# Executive Summary
+
+A typical PA customer: 74.6% Chance of lasting 3 months ($n$ = 430,062).
+A typical YA customer: 84.9% chance of lasting 2 months ($n$ = 244,319).
+
+Limitations:
+A) Typical customer = Not in the status: Inactive CC Decl. Customers
+B) Does not include Paused Events
+C) Does not include Customers with bugged Canceled Dates
+
+# Introduction
+This analysis will investigate the probability for Pilates Anytime (PA) and Yoga Anytime (YA) Customers to become profitable. This analysis uses the Kaplan-Meier Survival curve found in the "survminer" package in R Studio.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Install Libraries [only necessary once/  first time]
+# install.packages('survminer')
+# install.packages('lubridate')
+
+# Load Libraries
+library(ggplot2)
+library(survival)
+library(survminer)
+library(dplyr)
+library(DBI)
+library(lubridate)
+library(zoo)
+
+
+# Establish connection to PA
+conYA <- dbConnect(odbc::odbc(),
+                 Driver = "SQL Server",
+                 Server = "tsm-db3.cuwlemguhhpm.us-west-1.rds.amazonaws.com",
+                 Database = "pilates_finance",
+                 UID = "Thomas",
+                 PWD = rstudioapi::askForPassword("Database password"),
+                 Port = 1433)
+
+# Establish connection to YA
+conPA <- dbConnect(odbc::odbc(),
+                 Driver = "SQL Server",
+                 Server = "tsm-db3.cuwlemguhhpm.us-west-1.rds.amazonaws.com",
+                 Database = "yoga_finance",
+                 UID = "Thomas",
+                 PWD = rstudioapi::askForPassword("Database password"),
+                 Port = 1433)
+
+# DELETE ME #
+#kzPVkDNFiJQFi5qvtHUu
+# 
+# DELETE ME #
+
+# ADD ME (SURVIVAL CURVE BY MONTH)
+
+```
+
+```{r, echo=FALSE}
+# Query PA Customer Data
+PAcustomers <- dbGetQuery(conPA,'SELECT [customer_id],[customer_status_id],[date_cancelled] ,[date_first_paid] ,[total_revenue] ,[date_paused] ,[first_signup_date]  FROM [pilates_finance].[powerbi_views].[customers]')
+
+# Query YA Customer Data
+YAcustomers <- dbGetQuery(conYA,'SELECT [customer_id],[customer_status_id],[date_cancelled] ,[date_first_paid] ,[total_revenue] ,[date_paused] ,[first_signup_date] FROM [yoga_finance].[powerbi_views].[customers]')
+
+# Setup date format PA
+PAcustomers$date_first_paid <- format(PAcustomers$first_signup_date ,"%Y-%m-%d")
+PAcustomers$date_cancelled <-  format(PAcustomers$date_cancelled,"%Y-%m-%d")
+
+# Setup date format YA
+YAcustomers$date_first_paid <- format(YAcustomers$first_signup_date ,"%Y-%m-%d")
+YAcustomers$date_cancelled <-  format(YAcustomers$date_cancelled,"%Y-%m-%d")
+
+# Calculate Time Difference (age) between first sign up and date canceled
+PAcustomers$Time <- round(time_length(difftime(PAcustomers$date_cancelled,PAcustomers$first_signup_date ), "months"),0)
+YAcustomers$Time <- round(time_length(difftime(YAcustomers$date_cancelled,YAcustomers$first_signup_date), "months"),0)
+
+# Calculate Time Difference (age) for customers with no cancel date
+## Create current date column
+PAcustomers$SysTime <- Sys.time()
+YAcustomers$SysTime <- Sys.time()
+
+## Calculate TimeA: difference between sys.time and first sign-up date
+PAcustomers$TimeA <- round(time_length(difftime(PAcustomers$SysTime ,PAcustomers$first_signup_date ), "months"),0)
+YAcustomers$TimeA <- round(time_length(difftime(YAcustomers$SysTime ,YAcustomers$first_signup_date ), "months"),0)
+
+## If Time column is na then replace with TimeA
+PAcustomers$TimeB <- ifelse(is.na(PAcustomers$Time), PAcustomers$TimeA, PAcustomers$Time)
+YAcustomers$TimeB <- ifelse(is.na(YAcustomers$Time), YAcustomers$TimeA, YAcustomers$Time)
+
+# NEED TO CALCULATE TIME COLUMN FOR PEOPLE WHO ARE STILL ACTIVE ##
+
+PAcustomers$total_revenue <- round(PAcustomers$total_revenue,0)
+YAcustomers$total_revenue <- round(YAcustomers$total_revenue,0)
+
+# Remove NA
+PAcustomers1.1 <- subset(PAcustomers, is.na(PAcustomers$date_cancelled))
+YAcustomers1.1 <- subset(YAcustomers, is.na(YAcustomers$date_cancelled))
+
+PAcustomers1.2 <- subset(PAcustomers, !is.na(PAcustomers$date_cancelled))
+YAcustomers1.2 <- subset(YAcustomers, !is.na(YAcustomers$date_cancelled))
+
+PAcustomers1.1$Survival <- 1
+YAcustomers1.1$Survival <- 1
+
+PAcustomers1.2$Survival <- 2
+YAcustomers1.2$Survival <- 2
+
+# Recombine into Dataframe
+PAC <- rbind(PAcustomers1.1,PAcustomers1.2)
+YAC <- rbind(YAcustomers1.1,YAcustomers1.2)
+
+# Create COHORT GROUPS
+PAC$QTR <- as.yearqtr(PAC$first_signup_date, format = "%Y-%m-%d")
+YAC$QTR <- as.yearqtr(YAC$first_signup_date, format = "%Y-%m-%d")
+
+#  Create Month Variable
+PAC$Month <- format(PAC$first_signup_date,"%B")
+YAC$Month <- format(YAC$first_signup_date,"%B")
+
+# Change data type to factor
+YAC$Month <- as.factor(YAC$Month)
+PAC$Month <- as.factor(PAC$Month)
+
+# Select Columns
+PAC <- PAC[,c(1,2,5,11:14)]
+YAC <- YAC[,c(1,2,5,11:14)]
+
+# Remove NA Data
+PAC <- na.omit(PAC)
+YAC <- na.omit(YAC)
+
+# Change Column Names
+names(PAC)[4] <-"Time"
+names(YAC)[4] <-"Time"
+```
+
+An initial glimpse of the data can be found here:
+
+```{r, glimpse}
+
+# Checkout Data
+glimpse(PAC)
+glimpse(YAC)
+```
+
+# Clean Data: Remove irrelevant data
+
+```{r, Clean}
+# Remove negative Time (bugged canceled date customers 1/1/1900)
+PAC <- subset(PAC, PAC$Time >= 0)
+YAC <- subset(YAC, YAC$Time >= 0)
+
+# Remove Inactive CC Decl Customers
+PAC <- subset(PAC, PAC$customer_status_id !=11 )
+YAC <- subset(YAC, YAC$customer_status_id !=11 )
+
+# Remove  missing values from the variables we will use
+PAC <- with(PAC, PAC[complete.cases(customer_id, customer_status_id, total_revenue, Time, Survival), ])
+YAC <- with(YAC, YAC[complete.cases(customer_id, customer_status_id, total_revenue, Time, Survival), ])
+```
+
+# Identify Data: Categorize data for statistical tests
+
+```{r, Identify Data}
+# IDentify Data
+PAC$customer_id <- as.character(PAC$customer_id)
+PAC$customer_status_id <- as.character(PAC$customer_status_id)
+PAC$total_revenue <- as.numeric(PAC$total_revenue)
+PAC$Time <- as.numeric(PAC$Time)
+PAC$Survival <- as.double(PAC$Survival)
+
+YAC$customer_id <- as.character(YAC$customer_id)
+YAC$customer_status_id <- as.character(YAC$customer_status_id)
+YAC$total_revenue <- as.numeric(YAC$total_revenue)
+YAC$Time <- as.numeric(YAC$Time)
+YAC$Survival <- as.double(YAC$Survival)
+```
+
+# Survival Model
+```{r, Survival Analysis A, echo=FALSE}
+# Survival Analysis Create survival object
+PAsurv_object <- Surv(time = PAC$Time, event = PAC$Survival)
+YAsurv_object <- Surv(time = YAC$Time, event = YAC$Survival)
+ 
+# Create survival curve
+PKM_fit <- survfit(Surv(Time, Survival) ~ 1, data = PAC)
+YKM_fit <- survfit(Surv(Time, Survival) ~ 1, data = YAC)
+
+# Survival Analysis With QTR
+PKM_fitMth <- survfit(Surv(Time, Survival) ~ Month, data = PAC)
+YKM_fitMth <- survfit(Surv(Time, Survival) ~ Month, data = YAC)
+
+```
+
+Pilates Anytime:
+```{r, echo=FALSE}
+# Plot PA Survival Curve
+PKM_fit
+plot(PKM_fit, xlab = "Time to Cancel (Months)", ylab = "Survival Probability", 
+    main = "Kaplan-Meier Estimate of S(t) for Pilates Anytime")
+
+
+plot(PKM_fitMth, xlab = "Time to Cancel (Months)", ylab = "Survival Probability", 
+    main = "Kaplan-Meier Estimate of S(t) for Pilates Anytime")
+
+```
+
+Yoga Anytime:
+```{r, echo=FALSE}
+# Plot PA Survival Curve
+YKM_fit
+plot(YKM_fit, xlab = "Time to Cancel (Months)", ylab = "Survival Probability", 
+    main = "Kaplan-Meier Estimate of S(t) for Yoga Anytime")
+
+plot(YKM_fitMth, xlab = "Time to Cancel (Months)", ylab = "Survival Probability", 
+    main = "Kaplan-Meier Estimate of S(t) for Yoga Anytime")
+```
+
+## Survival Probabilities
+
+### Below is the survival probability for customers based on the CPA.
+
+CPA for **PA:** 54 dollars (~3 months subscription).
+```{r PA Model}
+# CPA
+PCPA <- summary(PKM_fit, times = c(3, 6, 9))
+# Full Year
+PFY <- summary(PKM_fit, times = c(1:12))
+PFY
+ summary(PKM_fitMth, times = c(1:12))
+```
+
+CPA for **YA:** 31 dollars (~2 months subscription)
+```{r YA Model}
+# CPA
+YCPA <- summary(YKM_fit, times = c(2, 4, 6))
+# Full Year
+YFY <- summary(YKM_fit, times = c(1:12))
+YFY <- summary(YKM_fitMth, times = c(1:12))
+YFY
+```
+
+## Plots
+
+```{r pressure, echo=FALSE}
+plot(PFY$n.event, PFY$n.risk ,xlab = "Customers Cancelled", ylab = "Customers at Risk", 
+    main = "Pilates Anytime Survival Model")
+
+plot(YFY$n.event, YFY$n.risk ,xlab = "Customers Cancelled", ylab = "Customers at Risk", 
+    main = "Yoga Anytime Survival Model")
+
+```
+
 
