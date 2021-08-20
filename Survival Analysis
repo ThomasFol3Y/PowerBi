@@ -53,13 +53,6 @@ conPA <- dbConnect(odbc::odbc(),
                  PWD = rstudioapi::askForPassword("Database password"),
                  Port = 1433)
 
-# DELETE ME #
-#kzPVkDNFiJQFi5qvtHUu
-# 
-# DELETE ME #
-
-# ADD ME (SURVIVAL CURVE BY MONTH)
-
 ```
 
 ```{r, echo=FALSE}
